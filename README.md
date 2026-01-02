@@ -149,7 +149,6 @@ The KV engine stores static secrets such as your JWT signing key.
 ```bash
 vault secrets enable -path=secret kv
 ```
-
 - **-path=secret** → mount point name; secrets will live under `secret/`.
 - **kv** → type of secrets engine (key‑value).
 
@@ -158,7 +157,6 @@ Store the JWT secret:
 ```bash
 vault kv put secret/jjwt jwt-secret-key="super-secret"
 ```
-
 - **secret/jjwt** → path where the secret is stored.
 - **jwt-secret-key="super-secret"** → field name and value stored at that path.
 
@@ -291,3 +289,171 @@ vault write -f auth/approle/role/springboot/secret-id
 - **Database engine** → generates dynamic Postgres credentials.
 - **Policy** → restricts access to only required paths.
 - **AppRole** → authenticates Spring Boot app.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# 📁 **2. application.yml (default runtime mode)**  
+This is the file Spring Boot loads automatically.
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ngelmakdb
+    username: ${OPENBAO_DB_USERNAME}
+    password: ${OPENBAO_DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: none
+```
+
+This is your **normal mode**.  
+Spring Boot uses dynamic credentials from OpenBao.
+
+---
+
+# 📁 **3. application-bootstrap.yml (schema creation mode)**  
+This file is only used when you explicitly activate the `bootstrap` profile.
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ngelmakdb
+    username: app_migrator
+    password: migratorpass
+  jpa:
+    hibernate:
+      ddl-auto: update   # or create / create-drop
+    show-sql: true
+```
+
+This is your **schema initialization mode**.
+
+---
+
+# 🚀 **4. How to run Spring Boot in schema creation mode**
+
+Use the `bootstrap` profile:
+
+### If you run with Maven:
+```bash
+mvn spring-boot:run -Dspring-boot.run.profiles=bootstrap
+```
+
+### If you run the JAR:
+```bash
+java -jar app.jar --spring.profiles.active=bootstrap
+```
+
+### If you run with Gradle:
+```bash
+./gradlew bootRun --args='--spring.profiles.active=bootstrap'
+```
+
+This will:
+
+- connect as `app_migrator`
+- create/update tables
+- apply default privileges for dynamic users
+- exit or continue running depending on your app
+
+---
+
+# 🟢 **5. How to run Spring Boot normally (runtime mode)**
+
+Just run it normally — no profile needed:
+
+### Maven:
+```bash
+mvn spring-boot:run
+```
+
+### JAR:
+```bash
+java -jar app.jar
+```
+
+### Gradle:
+```bash
+./gradlew bootRun
+```
+
+This uses:
+
+- dynamic credentials from OpenBao  
+- `ddl-auto: none`  
+- CRUD‑only dynamic users  
+
+---
+
+# 🎉 **6. Summary for your `.md`**
+
+```
+Spring Boot uses two profiles:
+
+1. bootstrap → schema creation/update
+   Run with:
+     mvn spring-boot:run -Dspring-boot.run.profiles=bootstrap
+     java -jar app.jar --spring.profiles.active=bootstrap
+
+2. default → runtime with OpenBao dynamic credentials
+   Run normally:
+     mvn spring-boot:run
+     java -jar app.jar
+```
+
+---
+
+If you want, I can generate:
+
+- a full `.md` section for “Spring Boot schema migration workflow”
+- a diagram showing the two modes
+- a script to automate switching modes
+
+Just tell me.
