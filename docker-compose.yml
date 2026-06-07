@@ -1,16 +1,18 @@
 services:
-  openbao:
+  # ---  Ngelmak Vault ---
+  vault:
     image: openbao/openbao:latest
-    container_name: ngelmak-openbao
+    container_name: vault
+    user: "1000:1000" # Run the container as the vault user (UID 1000) and group (GID 1000)
     ports:
       - "8200:8200"
-    environment:
-      # OpenBao needs to know where to store data
-      OPENBAO_DEV_ROOT_TOKEN_ID: root
-      OPENBAO_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
     volumes:
-      - ./data:/data
-      - ./config:/etc/openbao
+    - /var/lib/containers-data/vault/data:/data # Mount the data directory for Vault to persist its data
+    - /var/lib/containers-data/vault/config:/etc/openbao # Mount the configuration directory for Vault to read its configuration
+    - /var/lib/containers-data/vault/home:/home/vault # Mount the home directory for the vault user to store any necessary files
+    environment:
+      HOME: /home/vault # Set the HOME environment variable for the vault user
+      VAULT_ADDR: "http://127.0.0.1:8200" # Vault server address for clients to connect to
     command: server -config=/etc/openbao/config.hcl
     networks:
       - ngelmak-net
