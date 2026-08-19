@@ -69,10 +69,11 @@ sudo chmod -R 750 /var/lib/containers-data/vault
 
 Create a **Vault configuration file** at `/var/lib/containers-data/vault/config/config.hcl`:
 
-```hcl
+```bash
+tee /var/lib/containers-data/vault/config/config.hcl <<EOF
 # Storage backend: uses local Raft consensus for high availability
 storage "raft" {
-  path    = "/var/lib/containers-data/vault/data"
+  path    = "/data"
   node_id = "node1"
 }
 
@@ -93,6 +94,7 @@ disable_mlock = true
 
 # Enable the web UI for manual operations
 ui = true
+EOF
 ```
 
 **Configuration Explanation:**
@@ -265,15 +267,28 @@ The **KV (Key-Value) secrets engine** stores static secrets like your JWT signin
 #### Enable KV Engine
 
 ```bash
-vault secrets enable -path=secret kv
+vault secrets enable -path=secret kv-v2
 
-Success! Enabled the kv secrets engine at: secret/
+Success! Enabled the kv-v2 secrets engine at: secret/
 ```
 
 #### Store the JWT Secret
 
 ```bash
-vault kv put secret/jjwt jwt-secret-key="super-secret-key-change-this"
+vault kv put secret/jjwt/prod jwt-secret-key="NzgwODE3NjExMzk1MDFjYzc2NmRjMmM2Yjc0ZTYyMGUxODM3ZThjMzk0ZTliMTE0MjhlNjliOWRhYTI2MzFkN2RkMGU3NDVhYTA0MzRkNTBkNGEzY
+mZlMzE1MTg4ZjVmYzA5NmFlNTEyZjkyZjYxMGJlMTM1NmU3ZmU0NDg2Yjk="
+
+==== Secret Path ====
+secret/data/jjwt/prod
+
+======= Metadata =======
+Key                Value
+---                -----
+created_time       2026-06-14T09:55:11.156869923Z
+custom_metadata    <nil>
+deletion_time      n/a
+destroyed          false
+version            1
 ```
 
 - **secret/jjwt** → path where the secret is stored.
@@ -361,7 +376,10 @@ Create a Vault role that maps to an SQL template for generating users:
 ```bash
 vault write database/roles/ngelmak-springboot-role \
   db_name=ngelmak-postgres-database \
-  creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}';" \
+  creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}';\
+  GRANT USAGE ON SCHEMA public TO \"{{name}}\";\
+  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO \"{{name}}\";\
+  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO \"{{name}}\";" \
   default_ttl="48h" \
   max_ttl="72h"
 
@@ -386,14 +404,15 @@ vault read database/creds/ngelmak-springboot-role
 
 Key                Value
 ---                -----
-lease_id           database/creds/ngelmak-springboot-role/AB1CD2EF3
+lease_id           database/creds/ngelmak-springboot-role/1Nrt8zw320mbNzpKxcBujXVg
 lease_duration     48h
 lease_renewable    true
-password           xxxxxxxxxxx
-username           v_ngelmak_springboot_r_AbCdEfGhIjK
+password           vRlC9Q7StQjl-k0usOap
+username           v-root-ngelmak--CZkLv5WXifRExpG0K3gz-1781374514
+
 ```
 
-The temporary user `v_ngelmak_springboot_r_AbCdEfGhIjK` is valid for 48 hours, then automatically revoked.
+The temporary user `v-root-ngelmak--...` is valid for 48 hours, then automatically revoked.
 
 ---
 
@@ -405,25 +424,41 @@ The temporary user `v_ngelmak_springboot_r_AbCdEfGhIjK` is valid for 48 hours, t
 
 #### Create a Policy File
 
-Create `/var/lib/containers-data/vault/config/policies/ngelmak-springboot-policy.hcl`:
+Inside the container writhe the policy :
 
-```hcl
-# Allow reading the JWT secret
+```bash
+tee /etc/openbao/policies/ngelmak-springboot-policy.hcl <<EOF
+# Allow reading the base secret
 path "secret/data/jjwt" {
   capabilities = ["read"]
 }
 
-# Allow reading dynamic PostgreSQL credentials
+# Allow reading subkeys like prod, dev, etc.
+path "secret/data/jjwt/*" {
+  capabilities = ["read"]
+}
+
+# KV v2 metadata access
+path "secret/metadata/jjwt" {
+  capabilities = ["read"]
+}
+
+path "secret/metadata/jjwt/*" {
+  capabilities = ["read"]
+}
+
+# Dynamic DB creds
 path "database/creds/ngelmak-springboot-role" {
   capabilities = ["read"]
 }
+EOF
 ```
 
 **Path Explanation:**
 
 | Path | Purpose |
 |------|---------|
-| `secret/data/jjwt` | KV v2 API path for reading the JWT secret. (Note: KV v2 uses `data/` in the path.) |
+| `secret/jjwt` | KV v2 API path for reading the JWT secret. (Note: KV v2 uses `data/` in the path.) |
 | `database/creds/ngelmak-springboot-role` | Database engine path for requesting dynamic credentials. |
 
 **Capabilities:**
@@ -468,13 +503,13 @@ Success! Enabled approle auth method at: approle/
 #### Create an AppRole
 
 ```bash
-vault write auth/approle/role/springboot \
+vault write auth/approle/role/ngelmak-springboot-role \
   policies="ngelmak-springboot-policy" \
   secret_id_ttl=72h \
   token_ttl=24h \
   token_max_ttl=48h
 
-Success! Data written to: auth/approle/role/springboot
+Success! Data written to: auth/approle/role/ngelmak-springboot-role
 ```
 
 
@@ -492,7 +527,7 @@ Success! Data written to: auth/approle/role/springboot
 The **Role ID** is a non-secret identifier you can safely share with your app:
 
 ```bash
-vault read auth/approle/role/springboot/role-id
+vault read auth/approle/role/ngelmak-springboot-role/role-id
 
 Key        Value
 ---        -----
@@ -506,7 +541,7 @@ Save this Role ID in your app's configuration (e.g., `application.yml`).
 The **Secret ID** is the secret half of the AppRole credential. Generate one:
 
 ```bash
-vault write -f auth/approle/role/springboot/secret-id
+vault write -f auth/approle/role/ngelmak-springboot-role/secret-id
 
 Key                   Value
 ---                   -----
@@ -565,10 +600,9 @@ Configure your Spring Boot application to authenticate via AppRole and retrieve 
 spring:
   cloud:
     vault:
-      host: vault                          # Docker service name or IP
-      port: 8200
-      scheme: http                         # Use https in production
+      uri: http://vault:8200 # Docker service name and port
       authentication: APPROLE
+      fail-fast: true # Enable fail-fast to force confirmation. Spring Boot to crash immediately when Vault/OpenBao is not reachable
       app-role:
         role-id: c481309c-8927-83b8-92a3-771d312e4905
         secret-id: c78ee677-3b49-e5a8-9b91-810c1d768fa9
